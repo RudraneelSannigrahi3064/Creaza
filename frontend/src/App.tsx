@@ -36,7 +36,8 @@ function App() {
     updateLayer,
     updateLayerProps,
     moveLayer,
-    moveLayerPosition
+    handleAIProcess,
+    currentFilters
   } = useImageEditor()
 
   const downloadImage = (format: string) => {
@@ -45,7 +46,7 @@ function App() {
     const activeLayerData = layers.find(layer => layer.id === activeLayer)
     if (!activeLayerData || !activeLayerData.imageData) return
     
-    // Find the actual image bounds (non-transparent pixels)
+    // Find the actual image bounds (non-white pixels)
     const imageData = activeLayerData.imageData
     const data = imageData.data
     let minX = imageData.width, minY = imageData.height, maxX = 0, maxY = 0
@@ -53,9 +54,12 @@ function App() {
     for (let y = 0; y < imageData.height; y++) {
       for (let x = 0; x < imageData.width; x++) {
         const i = (y * imageData.width + x) * 4
-        const alpha = data[i + 3]
+        const r = data[i]
+        const g = data[i + 1]
+        const b = data[i + 2]
         
-        if (alpha > 0) {
+        // Check if pixel is not white (255,255,255)
+        if (!(r === 255 && g === 255 && b === 255)) {
           minX = Math.min(minX, x)
           minY = Math.min(minY, y)
           maxX = Math.max(maxX, x)
@@ -73,12 +77,6 @@ function App() {
     canvas.width = width
     canvas.height = height
     const ctx = canvas.getContext('2d')!
-    
-    // Only add white background for JPG
-    if (format === 'jpg') {
-      ctx.fillStyle = 'white'
-      ctx.fillRect(0, 0, width, height)
-    }
     
     // Extract only the image content area
     const croppedImageData = ctx.createImageData(width, height)
@@ -196,7 +194,6 @@ function App() {
               activeLayer={activeLayer}
               tool={tool}
               onLayerUpdate={updateLayer}
-              onMoveLayer={moveLayerPosition}
               onSelectLayer={setActiveLayer}
             />
           </div>
@@ -216,13 +213,13 @@ function App() {
             />
           </div>
           <div className="flex-1 border-t border-white/10">
-            <FilterPanel onApplyFilter={applyFilter} />
+            <FilterPanel 
+              onApplyFilter={applyFilter} 
+              currentFilters={currentFilters}
+            />
           </div>
           <div className="flex-1 border-t border-white/10">
-            <AIPanel onAIProcess={async (type, file) => {
-              console.log('AI Process:', type, file)
-              // Implement AI processing
-            }} />
+            <AIPanel onAIProcess={handleAIProcess} />
           </div>
         </aside>
       </div>

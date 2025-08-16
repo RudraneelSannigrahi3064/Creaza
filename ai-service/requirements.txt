@@ -4,3 +4,8 @@ pillow
 numpy
 opencv-python
 python-multipart
+diffusers
+torch
+torchvision
+transformers
+accelerate

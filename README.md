@@ -11,7 +11,7 @@ A GPU-accelerated image editor with WebGL rendering, modern glassmorphism UI, an
 - **Undo/Redo**: Complete history management
 - **Modern UI**: React + TailwindCSS with glassmorphism design
 - **WebAssembly**: Rust-powered pixel manipulation for heavy operations
-- **Local AI**: Optional background removal and style transfer
+- **Local AI**: Optional background removal, style transfer, and text-to-image generation
 
 ## Setup Instructions
 
@@ -45,6 +45,8 @@ wasm-pack build --target web
 ```bash
 cd ai-service
 pip install -r requirements.txt
+# For text-to-image generation (requires additional ~2GB download)
+# pip install diffusers torch torchvision transformers accelerate
 ```
 
 ### Running the Application

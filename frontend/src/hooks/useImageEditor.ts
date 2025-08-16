@@ -7,10 +7,14 @@ interface HistoryState {
   activeLayer: string | null
 }
 
+// Global filter state outside component
+let currentFilters: Record<string, number> = {}
+
 export function useImageEditor() {
   const [layers, setLayers] = useState<Layer[]>([])
   const [activeLayer, setActiveLayer] = useState<string | null>(null)
   const [tool, setTool] = useState<Tool>('move')
+  const [filterUpdate, setFilterUpdate] = useState(0)
   
   // History management
   const [history, setHistory] = useState<HistoryState[]>([])
@@ -236,6 +240,107 @@ export function useImageEditor() {
     saveToHistory()
   }, [saveToHistory])
 
+  const handleAIProcess = useCallback(async (type: string, file?: File, prompt?: string, size?: string) => {
+    try {
+      let response
+      
+      if (type === 'text-to-image') {
+        if (!prompt) return
+        
+        const [width, height] = (size || '512x512').split('x').map(Number)
+        
+        response = await fetch('http://localhost:8002/text-to-image', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt,
+            width,
+            height,
+            num_inference_steps: 50,
+            guidance_scale: 12.0
+          })
+        })
+      } else if (type === 'generate-caption') {
+        if (!file) return
+        
+        const formData = new FormData()
+        formData.append('file', file)
+        
+        response = await fetch('http://localhost:8002/generate-caption', {
+          method: 'POST',
+          body: formData
+        })
+        
+        if (response?.ok) {
+          const result = await response.json()
+          if (result.success && result.caption) {
+            alert(`Generated Caption: ${result.caption}`)
+          }
+        }
+        return
+      } else {
+        if (!file) return
+        
+        const formData = new FormData()
+        formData.append('file', file)
+        
+        const endpoints = {
+          'remove-background': '/remove-background',
+          'style-transfer': '/style-transfer',
+          'enhance': '/enhance-image'
+        }
+        
+        response = await fetch(`http://localhost:8002${endpoints[type as keyof typeof endpoints]}`, {
+          method: 'POST',
+          body: formData
+        })
+      }
+      
+      if (response?.ok) {
+        const result = await response.json()
+        
+        if (result.success && result.image) {
+          // Create new layer with AI-processed image
+          const img = new Image()
+          img.onload = () => {
+            const canvas = document.createElement('canvas')
+            canvas.width = 800
+            canvas.height = 500
+            const ctx = canvas.getContext('2d')!
+            
+            // Fill with white background
+            ctx.fillStyle = 'white'
+            ctx.fillRect(0, 0, canvas.width, canvas.height)
+            
+            // Center the image without scaling
+            const x = (canvas.width - img.width) / 2
+            const y = (canvas.height - img.height) / 2
+            
+            ctx.drawImage(img, x, y)
+            
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+            
+            const newLayer: Layer = {
+              id: `layer-${Date.now()}`,
+              name: type === 'text-to-image' ? `Generated: ${prompt?.slice(0, 20)}...` : `AI ${type}`,
+              visible: true,
+              opacity: 1,
+              blendMode: 'normal',
+              imageData
+            }
+            
+            setLayers(prev => [...prev, newLayer])
+            setActiveLayer(newLayer.id)
+            saveToHistory()
+          }
+          img.src = result.image
+        }
+      }
+    } catch (error) {
+      console.error('AI processing failed:', error)
+    }
+  }, [saveToHistory])
+
   const moveLayer = useCallback((layerId: string, direction: 'up' | 'down') => {
     setLayers(prev => {
       const index = prev.findIndex(layer => layer.id === layerId)
@@ -255,6 +360,10 @@ export function useImageEditor() {
   const applyFilter = useCallback((filter: string, value: number) => {
     if (!activeLayer) return
     
+    // Update global filters
+    currentFilters[filter] = value
+    setFilterUpdate(prev => prev + 1)
+    
     setLayers(prev => prev.map(layer => {
       if (layer.id === activeLayer && layer.imageData) {
         // Store original if not already stored
@@ -270,73 +379,57 @@ export function useImageEditor() {
         // Start with original image
         ctx.putImageData(layer.originalImageData, 0, 0)
         
-        if (filter === 'grayscale') {
-          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
-          const data = imageData.data
-          
-          for (let i = 0; i < data.length; i += 4) {
-            const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114
-            const factor = value / 100
-            data[i] = data[i] * (1 - factor) + gray * factor
-            data[i + 1] = data[i + 1] * (1 - factor) + gray * factor
-            data[i + 2] = data[i + 2] * (1 - factor) + gray * factor
-          }
-          
-          ctx.putImageData(imageData, 0, 0)
-        } else if (filter === 'blur' && value > 0) {
+        // Apply all filters in sequence
+        const filters = []
+        if (currentFilters.brightness && currentFilters.brightness !== 0) filters.push(`brightness(${100 + currentFilters.brightness}%)`)
+        if (currentFilters.contrast && currentFilters.contrast !== 0) filters.push(`contrast(${100 + currentFilters.contrast}%)`)
+        if (currentFilters.saturation && currentFilters.saturation !== 0) filters.push(`saturate(${100 + currentFilters.saturation}%)`)
+        if (currentFilters.hue && currentFilters.hue !== 0) filters.push(`hue-rotate(${currentFilters.hue}deg)`)
+        if (currentFilters.blur && currentFilters.blur > 0) filters.push(`blur(${currentFilters.blur}px)`)
+        
+        if (filters.length > 0) {
           const tempCanvas = document.createElement('canvas')
           tempCanvas.width = canvas.width
           tempCanvas.height = canvas.height
           const tempCtx = tempCanvas.getContext('2d')!
-          tempCtx.filter = `blur(${value}px)`
-          tempCtx.drawImage(canvas, 0, 0)
-          
-          ctx.clearRect(0, 0, canvas.width, canvas.height)
-          ctx.drawImage(tempCanvas, 0, 0)
-        } else if (filter === 'brightness' && value !== 0) {
-          const tempCanvas = document.createElement('canvas')
-          tempCanvas.width = canvas.width
-          tempCanvas.height = canvas.height
-          const tempCtx = tempCanvas.getContext('2d')!
-          tempCtx.filter = `brightness(${100 + value}%)`
-          tempCtx.drawImage(canvas, 0, 0)
-          
-          ctx.clearRect(0, 0, canvas.width, canvas.height)
-          ctx.drawImage(tempCanvas, 0, 0)
-        } else if (filter === 'contrast' && value !== 0) {
-          const tempCanvas = document.createElement('canvas')
-          tempCanvas.width = canvas.width
-          tempCanvas.height = canvas.height
-          const tempCtx = tempCanvas.getContext('2d')!
-          tempCtx.filter = `contrast(${100 + value}%)`
-          tempCtx.drawImage(canvas, 0, 0)
-          
-          ctx.clearRect(0, 0, canvas.width, canvas.height)
-          ctx.drawImage(tempCanvas, 0, 0)
-        } else if (filter === 'saturation' && value !== 0) {
-          const tempCanvas = document.createElement('canvas')
-          tempCanvas.width = canvas.width
-          tempCanvas.height = canvas.height
-          const tempCtx = tempCanvas.getContext('2d')!
-          tempCtx.filter = `saturate(${100 + value}%)`
-          tempCtx.drawImage(canvas, 0, 0)
-          
-          ctx.clearRect(0, 0, canvas.width, canvas.height)
-          ctx.drawImage(tempCanvas, 0, 0)
-        } else if (filter === 'hue' && value !== 0) {
-          const tempCanvas = document.createElement('canvas')
-          tempCanvas.width = canvas.width
-          tempCanvas.height = canvas.height
-          const tempCtx = tempCanvas.getContext('2d')!
-          tempCtx.filter = `hue-rotate(${value}deg)`
+          tempCtx.filter = filters.join(' ')
           tempCtx.drawImage(canvas, 0, 0)
           
           ctx.clearRect(0, 0, canvas.width, canvas.height)
           ctx.drawImage(tempCanvas, 0, 0)
         }
         
+        // Apply grayscale separately as it needs pixel manipulation
+        if (currentFilters.grayscale && currentFilters.grayscale > 0) {
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+          const data = imageData.data
+          
+          for (let i = 0; i < data.length; i += 4) {
+            const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114
+            const factor = currentFilters.grayscale / 100
+            data[i] = data[i] * (1 - factor) + gray * factor
+            data[i + 1] = data[i + 1] * (1 - factor) + gray * factor
+            data[i + 2] = data[i + 2] * (1 - factor) + gray * factor
+          }
+          
+          ctx.putImageData(imageData, 0, 0)
+        }
+        
         const newImageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
         return { ...layer, imageData: newImageData }
+      }
+      return layer
+    }))
+  }, [activeLayer])
+
+  const resetFilters = useCallback(() => {
+    if (!activeLayer) return
+    
+    currentFilters = {}
+    setFilterUpdate(prev => prev + 1)
+    setLayers(prev => prev.map(layer => {
+      if (layer.id === activeLayer && layer.originalImageData) {
+        return { ...layer, imageData: layer.originalImageData }
       }
       return layer
     }))
@@ -357,9 +450,12 @@ export function useImageEditor() {
     openImage,
     saveImage,
     applyFilter,
+    resetFilters,
     updateLayer,
     updateLayerProps,
     moveLayer,
-    setLayers
+    setLayers,
+    handleAIProcess,
+    currentFilters
   }
 }

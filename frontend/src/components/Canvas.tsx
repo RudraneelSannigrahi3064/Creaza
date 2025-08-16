@@ -8,6 +8,8 @@ export interface Layer {
   opacity: number
   blendMode: string
   imageData?: ImageData
+  originalImageData?: ImageData
+  filters?: Record<string, number>
 }
 
 interface CanvasProps {
@@ -44,7 +46,7 @@ export const Canvas = forwardRef<HTMLCanvasElement, CanvasProps>(
       const canvas = canvasRef.current
       if (!canvas) return
 
-      const ctx = canvas.getContext('2d')!
+      const ctx = canvas.getContext('2d', { willReadFrequently: true })!
       ctxRef.current = ctx
       
       // Set canvas size to fit screen
@@ -77,7 +79,7 @@ export const Canvas = forwardRef<HTMLCanvasElement, CanvasProps>(
           const tempCanvas = document.createElement('canvas')
           tempCanvas.width = activeLayerData.imageData.width
           tempCanvas.height = activeLayerData.imageData.height
-          const tempCtx = tempCanvas.getContext('2d')!
+          const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true })!
           tempCtx.putImageData(activeLayerData.imageData, 0, 0)
           
           // Apply opacity and blend mode
@@ -100,8 +102,8 @@ export const Canvas = forwardRef<HTMLCanvasElement, CanvasProps>(
       
       const rect = canvas.getBoundingClientRect()
       return {
-        x: (e.clientX - rect.left) / scale,
-        y: (e.clientY - rect.top) / scale
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top
       }
     }
 
@@ -401,21 +403,31 @@ export const Canvas = forwardRef<HTMLCanvasElement, CanvasProps>(
         )}
         
         {/* Crop overlay */}
-        {tool === 'crop' && cropStart && cropEnd && (
-          <div 
-            className="absolute border-2 border-blue-400 border-dashed bg-blue-400/20 pointer-events-none"
-            style={{
-              left: Math.min(cropStart.x, cropEnd.x),
-              top: Math.min(cropStart.y, cropEnd.y),
-              width: Math.abs(cropEnd.x - cropStart.x),
-              height: Math.abs(cropEnd.y - cropStart.y)
-            }}
-          >
-            <div className="absolute -top-6 left-0 bg-blue-500 text-white px-2 py-1 rounded text-xs">
-              {Math.round(Math.abs(cropEnd.x - cropStart.x))} × {Math.round(Math.abs(cropEnd.y - cropStart.y))}
+        {tool === 'crop' && cropStart && cropEnd && canvasRef.current && (() => {
+          const canvas = canvasRef.current
+          const rect = canvas.getBoundingClientRect()
+          const containerRect = canvas.parentElement?.getBoundingClientRect()
+          if (!containerRect) return null
+          
+          const canvasLeft = rect.left - containerRect.left
+          const canvasTop = rect.top - containerRect.top
+          
+          return (
+            <div 
+              className="absolute border-2 border-blue-400 border-dashed bg-blue-400/20 pointer-events-none"
+              style={{
+                left: canvasLeft + Math.min(cropStart.x, cropEnd.x),
+                top: canvasTop + Math.min(cropStart.y, cropEnd.y),
+                width: Math.abs(cropEnd.x - cropStart.x),
+                height: Math.abs(cropEnd.y - cropStart.y)
+              }}
+            >
+              <div className="absolute -top-6 left-0 bg-blue-500 text-white px-2 py-1 rounded text-xs">
+                {Math.round(Math.abs(cropEnd.x - cropStart.x))} × {Math.round(Math.abs(cropEnd.y - cropStart.y))}
+              </div>
             </div>
-          </div>
-        )}
+          )
+        })()}
         
         {/* Crop confirmation */}
         {showCropConfirm && (
@@ -435,10 +447,15 @@ export const Canvas = forwardRef<HTMLCanvasElement, CanvasProps>(
                       const height = Math.abs(cropEnd.y - cropStart.y)
                       
                       const croppedData = ctx.getImageData(x, y, width, height)
+                      
+                      // Clear canvas and fill with white
                       ctx.fillStyle = 'white'
                       ctx.fillRect(0, 0, canvas.width, canvas.height)
+                      
+                      // Put cropped image at top-left corner
                       ctx.putImageData(croppedData, 0, 0)
                       
+                      // Get the full canvas as new image data
                       const newImageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
                       onLayerUpdate(activeLayer, newImageData)
                     }

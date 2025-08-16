@@ -3,20 +3,21 @@ import { Sliders, Palette, Circle, Sun, Contrast } from 'lucide-react'
 
 interface FilterPanelProps {
   onApplyFilter: (filter: string, value: number) => void
+  onResetFilters?: () => void
+  currentFilters?: Record<string, number>
 }
 
-export function FilterPanel({ onApplyFilter }: FilterPanelProps) {
-  const [filters, setFilters] = useState({
-    brightness: 0,
-    contrast: 0,
-    saturation: 0,
-    hue: 0,
-    blur: 0,
-    grayscale: 0
-  })
+export function FilterPanel({ onApplyFilter, currentFilters = {} }: FilterPanelProps) {
+  const filters = {
+    brightness: currentFilters.brightness || 0,
+    contrast: currentFilters.contrast || 0,
+    saturation: currentFilters.saturation || 0,
+    hue: currentFilters.hue || 0,
+    blur: currentFilters.blur || 0,
+    grayscale: currentFilters.grayscale || 0
+  }
 
   const handleFilterChange = (filter: string, value: number) => {
-    setFilters(prev => ({ ...prev, [filter]: value }))
     onApplyFilter(filter, value)
   }
 
@@ -29,8 +30,9 @@ export function FilterPanel({ onApplyFilter }: FilterPanelProps) {
       blur: 0,
       grayscale: 0
     }
-    setFilters(resetValues)
-    onApplyFilter('grayscale', 0)
+    Object.entries(resetValues).forEach(([filter, value]) => {
+      onApplyFilter(filter, value)
+    })
   }
 
   return (
